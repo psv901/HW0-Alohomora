@@ -1,0 +1,115 @@
+
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+import scipy
+import scipy.stats as st
+import skimage.transform
+import sklearn.cluster
+
+def texton_DOG(Img, filter_bank):
+    tex_map = np.array(Img)
+    num_filters = len(filter_bank)
+    for i in range(num_filters):
+        out = cv2.filter2D(Img,-1,filter_bank[i])
+        tex_map = np.dstack((tex_map, out))
+    return tex_map
+
+#Define Texton Map using LM filters
+def texton_LM(Img, filter_bank ):
+    tex_map = np.array(Img)
+    _,_,num_filters = filter_bank.shape
+    for i in range(num_filters):
+        out = cv2.filter2D(Img,-1,filter_bank[:,:,i])
+        tex_map = np.dstack((tex_map, out))
+    return tex_map
+
+def Texton(img,filter_bank1,filter_bank2,filter_bank3, num_clusters):
+    p,q,_ = img.shape
+    tex_map_DOG = texton_DOG(img, filter_bank2)
+    tex_map_LM = texton_LM(img, filter_bank1)
+    tex_map_Gabor = texton_DOG(img, filter_bank3)
+    tex_map = np.dstack((tex_map_DOG[:,:,1:],tex_map_LM[:,:,1:],tex_map_Gabor[:,:,1:]))
+    m,n,r = tex_map.shape
+    inp = np.reshape(tex_map,((p*q),r))
+    kmeans = sklearn.cluster.KMeans(n_clusters = num_clusters, random_state = 2)
+    kmeans.fit(inp)
+    labels = kmeans.predict(inp)
+    l = np.reshape(labels,(m,n))
+    plt.imshow(l)
+    return l
+
+def brightness(Img, num_clusters):
+    p,q,r = Img.shape
+    inp = np.reshape(Img,((p*q),r))
+    kmeans = sklearn.cluster.KMeans(n_clusters = num_clusters, random_state = 2)
+    kmeans.fit(inp)
+    labels = kmeans.predict(inp)
+    l = np.reshape(labels,(p,q))
+    plt.imshow(l,cmap = 'binary')
+    return l
+
+def color(Img, num_clusters):
+    p,q,r = Img.shape
+    inp = np.reshape(Img,((p*q),r))
+    kmeans = sklearn.cluster.KMeans(n_clusters = num_clusters, random_state = 2)
+    kmeans.fit(inp)
+    labels = kmeans.predict(inp)
+    l = np.reshape(labels,(p,q))
+    plt.imshow(l)
+    return l
+
+def gradient(Img, bins, filter_bank):
+    gradVar = Img
+    for N in range(len(filter_bank)/2):
+        g = chi_sqr_gradient(Img, bins, filter_bank[2*N],filter_bank[2*N+1])
+        gradVar = np.dstack((gradVar,g))
+    mean = np.mean(gradVar,axis =2)
+    return mean
+#Define half disk filters for gradient calculation
+def half_disk(radius):
+    a=np.ones((2*radius+1,2*radius+1))
+    y,x = np.ogrid[-radius:radius+1,-radius:radius+1]
+    mask2 = x*x + y*y <= radius**2
+    a[mask2] = 0
+    b=np.ones((2*radius+1,2*radius+1))
+    y,x = np.ogrid[-radius:radius+1,-radius:radius+1]
+    p = x>-1
+    q = y>-radius-1
+    mask3 = p*q
+    b[mask3] = 0
+
+    return a, b
+
+def disk_masks(scales, orients):
+    flt = list()
+    orients = np.linspace(0,360,orients)
+    for i in scales:
+        radius = i
+        g = list()
+        a,b = half_disk(radius = radius)
+
+        for i,eachOrient in enumerate(orients):
+            c1 = skimage.transform.rotate(b,eachOrient,cval =1)
+            z1 = np.logical_or(a,c1)
+            z1 = z1.astype(np.int)
+            b2 = np.flip(b,1)
+            c2 = skimage.transform.rotate(b2,eachOrient,cval =1)
+            z2 = np.logical_or(a,c2)
+            z2 = z2.astype(np.int)
+            flt.append(z1)
+            flt.append(z2)
+
+    return flt
+def chi_sqr_gradient(Img, bins,filter1,filter2):
+    chi_sqr_dist = Img*0
+    g = list()
+    h = list()
+    for i in range(bins):
+        img = np.ma.masked_where(Img == i,Img)
+        img = img.mask.astype(np.int)
+        g = cv2.filter2D(img,-1,filter1)
+        h = cv2.filter2D(img,-1,filter2)
+        chi_sqr_dist = chi_sqr_dist + ((g-h)**2 /(g+h))
+    return chi_sqr_dist/2
+
